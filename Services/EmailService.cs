@@ -1,7 +1,5 @@
-// File: Services/EmailService.cs
 using System;
 using System.Text.RegularExpressions;
-using System.Linq;
 using MailKit.Net.Imap;
 using MailKit;
 using MailKit.Search;
@@ -29,12 +27,8 @@ namespace EmailTrackerBackend.Services
         }
 
         /// <summary>
-        /// Efficiently fetch only last 24h of emails:
-        /// 1) fetch UIDs since last 24h,
-        /// 2) batch-fetch headers (envelope),
-        /// 3) skip duplicates by message-id,
-        /// 4) download body only for likely meeting emails,
-        /// 5) parse meeting time and save.
+        /// Fetch only NEW emails after the last saved one.
+        /// If no emails in DB, fetch last 24 hours.
         /// </summary>
         public void FetchEmails()
         {
@@ -47,90 +41,63 @@ namespace EmailTrackerBackend.Services
                 var inbox = client.Inbox;
                 inbox.Open(FolderAccess.ReadOnly);
 
-                var sinceUtc = DateTime.UtcNow.AddDays(-1);
-                var uids = inbox.Search(SearchQuery.DeliveredAfter(sinceUtc));
+                // ✅ Get last saved email time from DB
+                var lastReceivedAt = _dbService.GetLastReceivedAt();
 
-                if (uids == null || uids.Count == 0)
+                DateTime sinceUtc;
+                if (lastReceivedAt.HasValue)
                 {
-                    Console.WriteLine("[EmailService] No messages in the last 24 hours.");
-                    client.Disconnect(true);
-                    return;
+                    sinceUtc = lastReceivedAt.Value.ToUniversalTime();
+                }
+                else
+                {
+                    // If no emails in DB, fetch last 24 hours as initial sync
+                    sinceUtc = DateTime.UtcNow.AddDays(-1);
                 }
 
-                // Batch fetch envelope + unique id (fast)
-                var summaries = inbox.Fetch(uids, MessageSummaryItems.Envelope | MessageSummaryItems.UniqueId);
+                Console.WriteLine($"[EmailService] Fetching emails after: {sinceUtc}");
 
-                foreach (var summary in summaries)
+                // ✅ Ask Gmail for only new emails
+                var uids = inbox.Search(SearchQuery.DeliveredAfter(sinceUtc));
+
+                foreach (var uid in uids)
                 {
                     try
                     {
-                        // Get basic header fields without downloading body
-                        var envelope = summary.Envelope;
-                        string subject = envelope?.Subject ?? string.Empty;
-                        string from = envelope?.From?.FirstOrDefault()?.ToString() ?? string.Empty;
-                        string messageId = envelope?.MessageId ?? string.Empty;
+                        var message = inbox.GetMessage(uid);
 
-                        // If no messageId, produce fallback key
-                        if (string.IsNullOrEmpty(messageId))
-                        {
-                            // fallback uses unique id ticks and subject hash — deterministic for same mail fetch
-                            messageId = $"{summary.UniqueId.Id}_{subject.GetHashCode()}";
-                        }
-
-                        // Skip duplicate by checking DB (fast)
-                        if (_dbService.EmailExists(messageId))
-                        {
-                            // already stored
-                            continue;
-                        }
-
-                        // Quick subject-level filter to avoid downloading many bodies
-                        var subjLower = subject.ToLowerInvariant();
-                        if (!(subjLower.Contains("meeting") || subjLower.Contains("schedule") || subjLower.Contains("appointment") || subjLower.Contains("invite") || subjLower.Contains("calendar")))
-                        {
-                            // not likely a meeting based on subject → skip body download
-                            continue;
-                        }
-
-                        // Now download full message only for candidates
-                        var message = inbox.GetMessage(summary.UniqueId);
-
-                        // Prefer text body, fallback to stripped HTML
+                        // Prefer plain text; fallback to simple stripped HTML
                         string bodyText = message.TextBody;
                         if (string.IsNullOrWhiteSpace(bodyText) && !string.IsNullOrWhiteSpace(message.HtmlBody))
                         {
                             bodyText = Regex.Replace(message.HtmlBody, "<[^>]+>", " ");
                         }
-                        bodyText = bodyText ?? string.Empty;
+                        if (string.IsNullOrWhiteSpace(bodyText))
+                            bodyText = string.Empty;
 
-                        // Double-check body for meeting indicators
+                        // Check if looks like a meeting
                         if (!EmailParser.IsMeeting(bodyText))
                             continue;
 
-                        // Extract meeting time (uses your EmailParser implementation)
+                        // Extract meeting time if present
                         DateTime? meetingTime = EmailParser.ExtractMeetingTime(bodyText);
 
-                        // build Email model
                         var email = new Email
                         {
-                            MessageId = messageId,
-                            Sender = from,
-                            Subject = subject,
+                            MessageId = message.MessageId, // ✅ unique ID for deduplication
+                            Sender = message.From?.ToString() ?? string.Empty,
+                            Subject = message.Subject ?? string.Empty,
                             Body = bodyText,
                             ReceivedAt = message.Date.DateTime,
                             IsTask = true,
                             MeetingTime = meetingTime
                         };
 
-                        // Save (SaveEmail uses ON DUPLICATE KEY UPDATE)
                         _dbService.SaveEmail(email);
-
-                        Console.WriteLine($"[EmailService] Saved: {subject} ({messageId})");
                     }
-                    catch (Exception exPer)
+                    catch (Exception exPerMessage)
                     {
-                        Console.WriteLine($"[EmailService] per-message error: {exPer.Message}");
-                        // continue with next summary
+                        Console.WriteLine($"[EmailService] Skipping message due to error: {exPerMessage.Message}");
                     }
                 }
 

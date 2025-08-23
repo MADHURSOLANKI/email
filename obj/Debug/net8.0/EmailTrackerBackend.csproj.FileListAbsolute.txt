@@ -48,3 +48,4 @@ C:\Users\Madhur Solanki\OneDrive\Desktop\My projects\code\email\EmailTrackerBack
 C:\Users\Madhur Solanki\OneDrive\Desktop\My projects\code\email\EmailTrackerBackend\bin\Debug\net8.0\Microsoft.Recognizers.Text.DateTime.dll
 C:\Users\Madhur Solanki\OneDrive\Desktop\My projects\code\email\EmailTrackerBackend\bin\Debug\net8.0\Microsoft.Recognizers.Text.Number.dll
 C:\Users\Madhur Solanki\OneDrive\Desktop\My projects\code\email\EmailTrackerBackend\bin\Debug\net8.0\Microsoft.Recognizers.Text.NumberWithUnit.dll
+C:\Users\Madhur Solanki\OneDrive\Desktop\My projects\code\email\EmailTrackerBackend\obj\Debug\net8.0\EmailTrackerBackend.sourcelink.json
