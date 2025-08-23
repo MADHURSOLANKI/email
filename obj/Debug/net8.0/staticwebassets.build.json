@@ -1,0 +1,11 @@
+{
+  "Version": 1,
+  "Hash": "1l2tMikvwGqGxl3rScSL5CIiAHmqirr4pP02NriE9/A=",
+  "Source": "EmailTrackerBackend",
+  "BasePath": "_content/EmailTrackerBackend",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [],
+  "Assets": []
+}
